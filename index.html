@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Karlskoga – folkmängd (SCB)</title>
+  <style>
+    :root { color-scheme: light dark; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 2rem; }
+    .card { max-width: 760px; margin: 0 auto; padding: 1.25rem 1.5rem; border: 1px solid rgba(0,0,0,.12); border-radius: 12px; }
+    h1 { margin: 0 0 .25rem 0; font-size: 1.5rem; }
+    .value { font-size: clamp(2rem, 6vw, 3.25rem); font-weight: 700; margin: .25rem 0 .5rem; }
+    .meta { color: #666; font-size: .95rem; }
+    .error { color: #b00020; white-space: pre-wrap; }
+    .small { font-size: .9rem; }
+    a { color: inherit; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Folkmängd i Karlskoga</h1>
+    <div id="value" class="value">Hämtar…</div>
+    <div id="meta" class="meta small"></div>
+    <details style="margin-top:1rem;">
+      <summary>Källa & tekniska detaljer</summary>
+      <div class="small" style="margin-top:.5rem; line-height:1.5;">
+        Region: <strong>1883 (Karlskoga)</strong><br/>
+        Tabell: <code>BE/BE0101/BE0101A/BefolkningNy</code><br/>
+        Urval: Kon = 1+2 (totalt), Ålder = totalt, Tid = senaste år<br/>
+        API: <code>POST https://api.scb.se/OV0104/v1/doris/sv/ssd/BE/BE0101/BE0101A/BefolkningNy</code><br/>
+        Läs mer i Statistikdatabasen: 
+        <a href="https://www.statistikdatabasen.scb.se/" target="_blank" rel="noreferrer">SCB – Statistikdatabasen</a>
+      </div>
+    </details>
+    <div id="error" class="error" style="margin-top:1rem;"></div>
+  </div>
+
+  <script>
+    // Enkel helper för att formatera heltal med tusentalsavgränsare
+    function fmtInt(x) {
+      try { return new Intl.NumberFormat('sv-SE').format(x); }
+      catch { return String(x); }
+    }
+
+    // Hämtar senaste totala folkmängden för Karlskoga (1883)
+    async function fetchLatestPopulationKarlskoga() {
+      const endpoint = "https://api.scb.se/OV0104/v1/doris/sv/ssd/BE/BE0101/BE0101A/BefolkningNy";
+      const body = {
+        query: [
+          { code: "Region", selection: { filter: "item", values: ["1883"] } },
+          { code: "Kon",    selection: { filter: "item", values: ["1+2"] } },   // totalt (män+kvinnor)
+          { code: "Alder",  selection: { filter: "item", values: ["totalt"] } },
+          { code: "Tid",    selection: { filter: "top",  values: ["1"] } }      // endast senaste år
+        ],
+        response: { format: "JSON" }
+      };
+
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Accept": "application/json" },
+        body: JSON.stringify(body)
+      });
+
+      if (!res.ok) {
+        throw new Error(`SCB svarade ${res.status} ${res.statusText}`);
+      }
+      return await res.json();
+    }
+
+    (async () => {
+      const $value = document.getElementById('value');
+      const $meta  = document.getElementById('meta');
+      const $error = document.getElementById('error');
+
+      try {
+        const json = await fetchLatestPopulationKarlskoga();
+
+        // SCB:s JSON (PxWeb 1.0) har struktur med .data (array av { key:[], values:["12345"] })
+        // Nycklar brukar vara [Region, Kön, Ålder, Tid] i samma ordning som tabellen.
+        const row = json && json.data && json.data[0];
+        if (!row) throw new Error("Inget data returnerades.");
+
+        const value = parseInt(row.values[0], 10);
+        const year  = row.key?.[3] || "";  // "Tid" ligger ofta sist i key-arrayen
+
+        // Hämta uppdateringsdatum från metadata om det finns
+        let updated = "";
+        const updatedMeta = (json && json.metadata) || (json && json.source) || null;
+        // metadata-fält kan variera mellan tabeller; vi visar hellre inget än felaktigt.
+        if (json && json.updated) updated = json.updated; // vissa svar har .updated
+        // fallback: plocka ev. från json.columns/labeltext om det finns (lämnas tomt om okänt)
+
+        $value.textContent = `${fmtInt(value)} invånare`;
+        $meta.textContent = [
+          year ? `Senaste år: ${year}` : null,
+          updated ? `Uppdaterad: ${updated}` : null,
+          "Källa: SCB"
+        ].filter(Boolean).join(" · ");
+      } catch (err) {
+        console.error(err);
+        $value.textContent = "—";
+        $error.textContent = String(err?.message || err);
+      }
+    })();
+  </script>
+</body>
+</html>
