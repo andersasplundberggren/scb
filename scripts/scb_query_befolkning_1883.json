@@ -1,0 +1,9 @@
+{
+  "query": [
+    { "code": "Region", "selection": { "filter": "item", "values": ["1883"] } },
+    { "code": "Kon",    "selection": { "filter": "item", "values": ["1+2"] } },
+    { "code": "Alder",  "selection": { "filter": "item", "values": ["totalt"] } },
+    { "code": "Tid",    "selection": { "filter": "top",  "values": ["1"] } }
+  ],
+  "response": { "format": "JSON" }
+}
