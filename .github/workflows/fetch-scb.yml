@@ -1,9 +1,9 @@
-name: Fetch SCB data
+name: Fetch SCB data (debug)
 
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 4 * * 2"  # tisdag 04:00 CET – justera vid behov
+    - cron: "0 4 * * 2"  # tisdag 04:00 CET
 
 permissions:
   contents: write
@@ -14,25 +14,60 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          persist-credentials: true  # behövs för git push
 
-      - name: Make data dir
+      - name: Show repo tree
+        run: |
+          echo "PWD=$(pwd)"
+          ls -la
+          echo "--- scripts/ ---"
+          ls -la scripts || true
+
+      - name: Verify query file exists
+        run: |
+          test -f scripts/scb_query_befolkning_1883.json || (echo "Saknar scripts/scb_query_befolkning_1883.json" && exit 1)
+          echo "Query file size:"
+          wc -c scripts/scb_query_befolkning_1883.json
+
+      - name: Prepare data dir
         run: mkdir -p data/scb/BE0101
 
       - name: Fetch latest total population for Karlskoga (1883)
         run: |
-          curl -s -X POST \
+          set -euo pipefail
+          URL="https://api.scb.se/OV0104/v1/doris/sv/ssd/BE/BE0101/BE0101A/BefolkningNy"
+          echo "Fetching from $URL"
+          # -S (show errors), -s (silent), -f (fail non-2xx), -D dump headers
+          curl -Ssf -X POST \
             -H "Content-Type: application/json" \
             --data @scripts/scb_query_befolkning_1883.json \
-            "https://api.scb.se/OV0104/v1/doris/sv/ssd/BE/BE0101/BE0101A/BefolkningNy" \
+            -D data/scb/BE0101/headers.txt \
+            "$URL" \
             -o data/scb/BE0101/folkmangd_latest.json
+          echo "---- Response headers ----"
+          sed -n '1,50p' data/scb/BE0101/headers.txt || true
 
-      - name: Basic validation (non-empty + JSON parse)
+      - name: Inspect downloaded file
         run: |
-          test -s data/scb/BE0101/folkmangd_latest.json
+          set -euo pipefail
+          ls -la data/scb/BE0101
+          echo "File size:"
+          wc -c data/scb/BE0101/folkmangd_latest.json
+          echo "First 40 lines:"
+          sed -n '1,40p' data/scb/BE0101/folkmangd_latest.json | sed 's/[[:cntrl:]]//g' || true
+          # Basic JSON parse
           node -e "JSON.parse(require('fs').readFileSync('data/scb/BE0101/folkmangd_latest.json','utf8'))"
 
-      - name: Commit data if changed
-        uses: EndBug/add-and-commit@v9
-        with:
-          add: "data/scb/BE0101/folkmangd_latest.json"
-          message: "chore(data): update SCB folkmängd Karlskoga (1883)"
+      - name: Commit & push if changed
+        run: |
+          set -e
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/scb/BE0101/folkmangd_latest.json data/scb/BE0101/headers.txt
+          if git diff --cached --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -m "chore(data): update SCB folkmängd Karlskoga (1883)"
+            git push
+          fi
