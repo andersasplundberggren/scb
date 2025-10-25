@@ -4,16 +4,24 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>Karlskoga – folkmängd (SCB)</title>
+  <meta name="theme-color" content="#0B1220"/>
   <style>
     :root { color-scheme: light dark; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 2rem; }
-    .card { max-width: 760px; margin: 0 auto; padding: 1.25rem 1.5rem; border: 1px solid rgba(0,0,0,.12); border-radius: 12px; }
-    h1 { margin: 0 0 .25rem 0; font-size: 1.5rem; }
-    .value { font-size: clamp(2rem, 6vw, 3.25rem); font-weight: 700; margin: .25rem 0 .5rem; }
+    * { box-sizing: border-box; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 2rem; background: #f6f7fb; }
+    .card { max-width: 760px; margin: 0 auto; padding: 1.25rem 1.5rem; border: 1px solid rgba(0,0,0,.12); border-radius: 14px; background: #fff; }
+    h1 { margin: 0 0 .5rem 0; font-size: clamp(1.4rem, 3vw, 1.8rem); }
+    .value { font-size: clamp(2rem, 7vw, 3.4rem); font-weight: 800; margin: .25rem 0 .5rem; letter-spacing: .02em; }
     .meta { color: #666; font-size: .95rem; }
-    .error { color: #b00020; white-space: pre-wrap; }
     .small { font-size: .9rem; }
-    a { color: inherit; }
+    .error { color: #b00020; white-space: pre-wrap; margin-top: .75rem; }
+    details { margin-top: 1rem; }
+    a { color: inherit; text-decoration: underline; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0b1220; color: #e6e8ee; }
+      .card { background: #111a2c; border-color: rgba(255,255,255,.12); }
+      .meta { color: #aeb6c2; }
+    }
   </style>
 </head>
 <body>
@@ -21,48 +29,32 @@
     <h1>Folkmängd i Karlskoga</h1>
     <div id="value" class="value">Hämtar…</div>
     <div id="meta" class="meta small"></div>
-    <details style="margin-top:1rem;">
+
+    <details>
       <summary>Källa & tekniska detaljer</summary>
-      <div class="small" style="margin-top:.5rem; line-height:1.5;">
+      <div class="small" style="margin-top:.5rem; line-height:1.55;">
         Region: <strong>1883 (Karlskoga)</strong><br/>
         Tabell: <code>BE/BE0101/BE0101A/BefolkningNy</code><br/>
-        Urval: Kon = 1+2 (totalt), Ålder = totalt, Tid = senaste år<br/>
-        API: <code>POST https://api.scb.se/OV0104/v1/doris/sv/ssd/BE/BE0101/BE0101A/BefolkningNy</code><br/>
-        Läs mer i Statistikdatabasen: 
-        <a href="https://www.statistikdatabasen.scb.se/" target="_blank" rel="noreferrer">SCB – Statistikdatabasen</a>
+        Urval: Kön = 1+2 (totalt), Ålder = totalt, Tid = senaste år<br/>
+        Data läses från <code>./data/scb/BE0101/folkmangd_latest.json</code> som uppdateras av GitHub Actions.<br/>
+        Statistikdatabasen: <a href="https://www.statistikdatabasen.scb.se/" target="_blank" rel="noreferrer">SCB – Statistikdatabasen</a>
       </div>
     </details>
-    <div id="error" class="error" style="margin-top:1rem;"></div>
+
+    <div id="error" class="error" aria-live="polite"></div>
   </div>
 
   <script>
-    // Enkel helper för att formatera heltal med tusentalsavgränsare
-    function fmtInt(x) {
-      try { return new Intl.NumberFormat('sv-SE').format(x); }
-      catch { return String(x); }
-    }
+    function fmtInt(x){ try { return new Intl.NumberFormat('sv-SE').format(x); } catch { return String(x); } }
 
-    // Hämtar senaste totala folkmängden för Karlskoga (1883)
-    async function fetchLatestPopulationKarlskoga() {
-      const endpoint = "https://api.scb.se/OV0104/v1/doris/sv/ssd/BE/BE0101/BE0101A/BefolkningNy";
-      const body = {
-        query: [
-          { code: "Region", selection: { filter: "item", values: ["1883"] } },
-          { code: "Kon",    selection: { filter: "item", values: ["1+2"] } },   // totalt (män+kvinnor)
-          { code: "Alder",  selection: { filter: "item", values: ["totalt"] } },
-          { code: "Tid",    selection: { filter: "top",  values: ["1"] } }      // endast senaste år
-        ],
-        response: { format: "JSON" }
-      };
-
-      const res = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Accept": "application/json" },
-        body: JSON.stringify(body)
-      });
-
+    async function loadLocalPopulation() {
+      const res = await fetch("./data/scb/BE0101/folkmangd_latest.json", { cache: "no-store" });
       if (!res.ok) {
-        throw new Error(`SCB svarade ${res.status} ${res.statusText}`);
+        throw new Error(
+          res.status === 404
+            ? "Datafil saknas (404). Kör Actions → 'Fetch SCB data' först så genereras filen."
+            : `Kunde inte läsa datafilen (${res.status} ${res.statusText})`
+        );
       }
       return await res.json();
     }
@@ -73,22 +65,17 @@
       const $error = document.getElementById('error');
 
       try {
-        const json = await fetchLatestPopulationKarlskoga();
+        const json = await loadLocalPopulation();
 
-        // SCB:s JSON (PxWeb 1.0) har struktur med .data (array av { key:[], values:["12345"] })
-        // Nycklar brukar vara [Region, Kön, Ålder, Tid] i samma ordning som tabellen.
-        const row = json && json.data && json.data[0];
-        if (!row) throw new Error("Inget data returnerades.");
+        // PxWeb JSON: json.data[0].values[0] = talet, json.data[0].key[3] = "Tid" (år)
+        const row = json?.data?.[0];
+        if (!row) throw new Error("Inget data returnerades från SCB.");
 
-        const value = parseInt(row.values[0], 10);
-        const year  = row.key?.[3] || "";  // "Tid" ligger ofta sist i key-arrayen
+        const value = parseInt(row.values?.[0], 10);
+        const year  = (row.key && row.key[row.key.length - 1]) || ""; // sista nyckeln är normalt Tid
+        const updated = json?.updated || ""; // finns ibland
 
-        // Hämta uppdateringsdatum från metadata om det finns
-        let updated = "";
-        const updatedMeta = (json && json.metadata) || (json && json.source) || null;
-        // metadata-fält kan variera mellan tabeller; vi visar hellre inget än felaktigt.
-        if (json && json.updated) updated = json.updated; // vissa svar har .updated
-        // fallback: plocka ev. från json.columns/labeltext om det finns (lämnas tomt om okänt)
+        if (!Number.isFinite(value)) throw new Error("Värdet kunde inte tolkas som heltal.");
 
         $value.textContent = `${fmtInt(value)} invånare`;
         $meta.textContent = [
@@ -96,6 +83,7 @@
           updated ? `Uppdaterad: ${updated}` : null,
           "Källa: SCB"
         ].filter(Boolean).join(" · ");
+
       } catch (err) {
         console.error(err);
         $value.textContent = "—";
