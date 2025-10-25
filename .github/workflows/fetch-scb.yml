@@ -3,7 +3,10 @@ name: Fetch SCB data
 on:
   workflow_dispatch:
   schedule:
-    - cron: "0 4 * * 2"  # tisdag 04:00 CET – justera efter behov
+    - cron: "0 4 * * 2"  # tisdag 04:00 CET – justera vid behov
+
+permissions:
+  contents: write
 
 jobs:
   fetch:
@@ -23,7 +26,7 @@ jobs:
             "https://api.scb.se/OV0104/v1/doris/sv/ssd/BE/BE0101/BE0101A/BefolkningNy" \
             -o data/scb/BE0101/folkmangd_latest.json
 
-      - name: Basic validation (non-empty + parse)
+      - name: Basic validation (non-empty + JSON parse)
         run: |
           test -s data/scb/BE0101/folkmangd_latest.json
           node -e "JSON.parse(require('fs').readFileSync('data/scb/BE0101/folkmangd_latest.json','utf8'))"
