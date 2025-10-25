@@ -1,0 +1,35 @@
+name: Fetch SCB data
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * 2"  # tisdag 04:00 CET – justera efter behov
+
+jobs:
+  fetch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make data dir
+        run: mkdir -p data/scb/BE0101
+
+      - name: Fetch latest total population for Karlskoga (1883)
+        run: |
+          curl -s -X POST \
+            -H "Content-Type: application/json" \
+            --data @scripts/scb_query_befolkning_1883.json \
+            "https://api.scb.se/OV0104/v1/doris/sv/ssd/BE/BE0101/BE0101A/BefolkningNy" \
+            -o data/scb/BE0101/folkmangd_latest.json
+
+      - name: Basic validation (non-empty + parse)
+        run: |
+          test -s data/scb/BE0101/folkmangd_latest.json
+          node -e "JSON.parse(require('fs').readFileSync('data/scb/BE0101/folkmangd_latest.json','utf8'))"
+
+      - name: Commit data if changed
+        uses: EndBug/add-and-commit@v9
+        with:
+          add: "data/scb/BE0101/folkmangd_latest.json"
+          message: "chore(data): update SCB folkmängd Karlskoga (1883)"
