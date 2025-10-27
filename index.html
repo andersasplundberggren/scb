@@ -3,8 +3,9 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Karlskoga – folkmängd (SCB)</title>
+  <title>Karlskoga – folkmängd (SCB via proxy)</title>
   <meta name="theme-color" content="#0B1220"/>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E📊%3C/text%3E%3C/svg%3E">
   <style>
     :root { color-scheme: light dark; }
     * { box-sizing: border-box; }
@@ -36,7 +37,7 @@
         Region: <strong>1883 (Karlskoga)</strong><br/>
         Tabell: <code>BE/BE0101/BE0101A/BefolkningNy</code><br/>
         Urval: Kön = 1+2 (totalt), Ålder = totalt, Tid = senaste år<br/>
-        Data läses från <code>./data/scb/BE0101/folkmangd_latest.json</code> som uppdateras av GitHub Actions.<br/>
+        Denna sida anropar en liten proxy (Apps Script) som i sin tur hämtar från SCB.<br/>
         Statistikdatabasen: <a href="https://www.statistikdatabasen.scb.se/" target="_blank" rel="noreferrer">SCB – Statistikdatabasen</a>
       </div>
     </details>
@@ -45,17 +46,15 @@
   </div>
 
   <script>
+    // 1) Klistra in din Apps Script "Web app URL" här:
+    const PROXY_URL = "https://script.google.com/macros/s/AKfycbwWVf5T4d-JJwbX0alOhs9bCDZwGolqClKoRpztXBvZhcv8LhzfUl_jtS7wE2vICAM/exec";
+
     function fmtInt(x){ try { return new Intl.NumberFormat('sv-SE').format(x); } catch { return String(x); } }
 
-    async function loadLocalPopulation() {
-      const res = await fetch("./data/scb/BE0101/folkmangd_latest.json", { cache: "no-store" });
-      if (!res.ok) {
-        throw new Error(
-          res.status === 404
-            ? "Datafil saknas (404). Kör Actions → 'Fetch SCB data' först så genereras filen."
-            : `Kunde inte läsa datafilen (${res.status} ${res.statusText})`
-        );
-      }
+    async function fetchViaProxy() {
+      // Enkel GET utan headers → ingen preflight → brukar funka fint mot Apps Script
+      const res = await fetch(PROXY_URL, { method: "GET", cache: "no-store" });
+      if (!res.ok) throw new Error(`Proxy svarade ${res.status} ${res.statusText}`);
       return await res.json();
     }
 
@@ -65,15 +64,13 @@
       const $error = document.getElementById('error');
 
       try {
-        const json = await loadLocalPopulation();
-
-        // PxWeb JSON: json.data[0].values[0] = talet, json.data[0].key[3] = "Tid" (år)
+        const json = await fetchViaProxy();
         const row = json?.data?.[0];
         if (!row) throw new Error("Inget data returnerades från SCB.");
 
         const value = parseInt(row.values?.[0], 10);
         const year  = (row.key && row.key[row.key.length - 1]) || ""; // sista nyckeln är normalt Tid
-        const updated = json?.updated || ""; // finns ibland
+        const updated = json?.updated || ""; // vissa tabeller har detta fält
 
         if (!Number.isFinite(value)) throw new Error("Värdet kunde inte tolkas som heltal.");
 
@@ -81,9 +78,8 @@
         $meta.textContent = [
           year ? `Senaste år: ${year}` : null,
           updated ? `Uppdaterad: ${updated}` : null,
-          "Källa: SCB"
+          "Källa: SCB (via proxy)"
         ].filter(Boolean).join(" · ");
-
       } catch (err) {
         console.error(err);
         $value.textContent = "—";
