@@ -1,91 +1,305 @@
 <!DOCTYPE html>
 <html lang="sv">
 <head>
-  <meta charset="UTF-8" />
+  <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Karlskoga – folkmängd (SCB via proxy)</title>
+  <title>Karlskoga – Befolkning (SCB)</title>
   <meta name="theme-color" content="#0B1220"/>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ctext y='14' font-size='14'%3E📊%3C/text%3E%3C/svg%3E">
+  <!-- Chart.js via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
   <style>
     :root { color-scheme: light dark; }
     * { box-sizing: border-box; }
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; padding: 2rem; background: #f6f7fb; }
-    .card { max-width: 760px; margin: 0 auto; padding: 1.25rem 1.5rem; border: 1px solid rgba(0,0,0,.12); border-radius: 14px; background: #fff; }
+    .wrap { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1fr; gap: 1rem; }
+    .card { padding: 1rem 1.25rem; border: 1px solid rgba(0,0,0,.12); border-radius: 14px; background: #fff; }
     h1 { margin: 0 0 .5rem 0; font-size: clamp(1.4rem, 3vw, 1.8rem); }
-    .value { font-size: clamp(2rem, 7vw, 3.4rem); font-weight: 800; margin: .25rem 0 .5rem; letter-spacing: .02em; }
+    .row { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; }
+    label { font-weight: 600; margin-right: .35rem; }
+    select, button { padding: .5rem .6rem; border-radius: 10px; border: 1px solid rgba(0,0,0,.2); background: #fff; }
+    button { cursor: pointer; }
+    .big { font-size: clamp(1.8rem, 6vw, 3rem); font-weight: 800; letter-spacing: .02em; }
     .meta { color: #666; font-size: .95rem; }
-    .small { font-size: .9rem; }
-    .error { color: #b00020; white-space: pre-wrap; margin-top: .75rem; }
-    details { margin-top: 1rem; }
-    a { color: inherit; text-decoration: underline; }
+    .error { color: #b00020; white-space: pre-wrap; }
+    details { margin-top: .5rem; }
+    pre { background:#f2f4f8; padding:.5rem; border-radius: 8px; overflow:auto; }
     @media (prefers-color-scheme: dark) {
       body { background: #0b1220; color: #e6e8ee; }
       .card { background: #111a2c; border-color: rgba(255,255,255,.12); }
+      select, button { background: #111a2c; color: #e6e8ee; border-color: rgba(255,255,255,.2); }
       .meta { color: #aeb6c2; }
+      pre { background: #0f1729; }
     }
   </style>
 </head>
 <body>
+<div class="wrap">
   <div class="card">
-    <h1>Folkmängd i Karlskoga</h1>
-    <div id="value" class="value">Hämtar…</div>
-    <div id="meta" class="meta small"></div>
-
-    <details>
-      <summary>Källa & tekniska detaljer</summary>
-      <div class="small" style="margin-top:.5rem; line-height:1.55;">
-        Region: <strong>1883 (Karlskoga)</strong><br/>
-        Tabell: <code>BE/BE0101/BE0101A/BefolkningNy</code><br/>
-        Urval: Kön = 1+2 (totalt), Ålder = totalt, Tid = senaste år<br/>
-        Denna sida anropar en liten proxy (Apps Script) som i sin tur hämtar från SCB.<br/>
-        Statistikdatabasen: <a href="https://www.statistikdatabasen.scb.se/" target="_blank" rel="noreferrer">SCB – Statistikdatabasen</a>
+    <h1>Befolkning i Karlskoga – interaktiv</h1>
+    <div class="row">
+      <div>
+        <label for="months">Tidsomfång:</label>
+        <select id="months">
+          <option value="12">12 månader</option>
+          <option value="24">24 månader</option>
+          <option value="60">5 år (60 mån)</option>
+          <option value="120">10 år (120 mån)</option>
+        </select>
       </div>
-    </details>
-
-    <div id="error" class="error" aria-live="polite"></div>
+      <div>
+        <label for="sexView">Könsvy:</label>
+        <select id="sexView">
+          <option value="total">Totalt (män+kvinnor)</option>
+          <option value="both">Män & kvinnor (separata serier)</option>
+          <option value="men">Endast män</option>
+          <option value="women">Endast kvinnor</option>
+        </select>
+      </div>
+      <div>
+        <label for="chartType">Diagram:</label>
+        <select id="chartType">
+          <option value="line">Linjediagram</option>
+          <option value="stacked">Staplad area (män+kvinnor)</option>
+        </select>
+      </div>
+      <div>
+        <button id="refreshBtn">Uppdatera</button>
+        <button id="downloadBtn" title="Ladda ned rå-JSON">Ladda ned JSON</button>
+      </div>
+    </div>
   </div>
 
-  <script>
-    // 1) Klistra in din Apps Script "Web app URL" här:
-    const PROXY_URL = "https://script.google.com/macros/s/AKfycbwWVf5T4d-JJwbX0alOhs9bCDZwGolqClKoRpztXBvZhcv8LhzfUl_jtS7wE2vICAM/exec";
+  <div class="card">
+    <div id="headline" class="big">—</div>
+    <div id="meta" class="meta"></div>
+    <canvas id="chart" height="120"></canvas>
+    <div id="error" class="error" style="margin-top:.5rem;"></div>
 
-    function fmtInt(x){ try { return new Intl.NumberFormat('sv-SE').format(x); } catch { return String(x); } }
+    <details>
+      <summary>Källa & detaljer</summary>
+      <div class="meta">
+        Källa: SCB – <em>Folkmängden per månad efter region, ålder och kön</em> (<code>BefolkManad</code>)<br/>
+        Region: <strong>1883 (Karlskoga)</strong>, Ålder: <code>tot</code>, Kön: <code>1</code> (män), <code>2</code> (kvinnor), Mått: <code>BE0101N1</code> (Folkmängd)
+      </div>
+      <div style="margin-top:.5rem;">
+        <code id="pxUrl"></code>
+      </div>
+      <details style="margin-top:.5rem;">
+        <summary>Debug JSON</summary>
+        <pre id="debug"></pre>
+      </details>
+    </details>
+  </div>
+</div>
 
-    async function fetchViaProxy() {
-      // Enkel GET utan headers → ingen preflight → brukar funka fint mot Apps Script
-      const res = await fetch(PROXY_URL, { method: "GET", cache: "no-store" });
-      if (!res.ok) throw new Error(`Proxy svarade ${res.status} ${res.statusText}`);
-      return await res.json();
+<script>
+  // === 1) KLIPP IN DIN Apps Script-URL (slutar på /exec) ===
+  const PROXY_URL = "https://script.google.com/macros/s/AKfycbwWVf5T4d-JJwbX0alOhs9bCDZwGolqClKoRpztXBvZhcv8LhzfUl_jtS7wE2vICAM/exec";
+
+  // === 2) Konstanter för SCB-anrop (BefolkManad) ===
+  const SCB_PATH = "BE/BE0101/BE0101A/BefolkManad";     // PxWeb path under OV0104/v1/doris/sv/ssd
+  const REGION = "1883";                                 // Karlskoga
+  const CONTENTS = "BE0101N1";                           // Folkmängd
+  const AGE = "tot";                                     // total ålder
+  const SEX_MEN = "1", SEX_WOMEN = "2";
+
+  // UI refs
+  const $months = document.getElementById('months');
+  const $sexView = document.getElementById('sexView');
+  const $chartType = document.getElementById('chartType');
+  const $btn = document.getElementById('refreshBtn');
+  const $download = document.getElementById('downloadBtn');
+  const $headline = document.getElementById('headline');
+  const $meta = document.getElementById('meta');
+  const $debug = document.getElementById('debug');
+  const $pxUrl = document.getElementById('pxUrl');
+  const $err = document.getElementById('error');
+
+  // Hjälpare
+  const fmtInt = (x) => {
+    try { return new Intl.NumberFormat('sv-SE').format(x); }
+    catch { return String(x); }
+  };
+
+  function buildPxBody(monthCount) {
+    return {
+      query: [
+        { code: 'Region',       selection: { filter: 'item', values: [REGION] } },
+        { code: 'Alder',        selection: { filter: 'item', values: [AGE] } },
+        { code: 'Kon',          selection: { filter: 'item', values: [SEX_MEN, SEX_WOMEN] } }, // vi hämtar båda och filtrerar/summerar i klient
+        { code: 'ContentsCode', selection: { filter: 'item', values: [CONTENTS] } },
+        { code: 'Tid',          selection: { filter: 'top',  values: [String(monthCount)] } }   // senaste N månader
+      ],
+      response: { format: 'JSON' }
+    };
+  }
+
+  async function scbFetch(path, bodyObj) {
+    const url = PROXY_URL
+      + "?path=" + encodeURIComponent(path)
+      + "&body=" + encodeURIComponent(JSON.stringify(bodyObj));
+    const res = await fetch(url, { cache: 'no-store' });
+    if (!res.ok) throw new Error(`Proxy ${res.status} ${res.statusText}`);
+    const j = await res.json();
+    if (j && j.error) {
+      // Proxyn returnerar fel i JSON-form – kasta som Error
+      throw new Error((j.status ? `[${j.status}] ` : '') + (j.error || 'Okänt fel') + (j.scbText ? `\n\nSCB: ${j.scbText}` : ''));
+    }
+    return j;
+  }
+
+  function reshapeBefolkManad(json) {
+    // Returnerar { labels: [YYYYMM], men:[], women:[], total:[], last: {period, men, women, total}, updated }
+    if (!json?.data?.length) throw new Error("Inget data returnerades från SCB.");
+    const rows = json.data;
+    const map = new Map(); // period -> { men, women }
+
+    // Hitta index för dimensioner (Kon, Tid) från columns
+    const colIndex = {};
+    (json.columns || []).forEach((c, i) => { colIndex[c.code] = i; });
+
+    for (const r of rows) {
+      const keys = r.key || [];
+      const val = parseInt(r.values?.[0], 10);
+      const kon = keys[colIndex['Kon']];
+      const period = keys[colIndex['Tid']];
+      if (!map.has(period)) map.set(period, { men: 0, women: 0 });
+      if (kon === SEX_MEN && Number.isFinite(val)) map.get(period).men = val;
+      if (kon === SEX_WOMEN && Number.isFinite(val)) map.get(period).women = val;
     }
 
-    (async () => {
-      const $value = document.getElementById('value');
-      const $meta  = document.getElementById('meta');
-      const $error = document.getElementById('error');
+    // sortera perioder kronologiskt
+    const labels = Array.from(map.keys()).sort((a, b) => a.localeCompare(b));
+    const men = labels.map(p => map.get(p).men || 0);
+    const women = labels.map(p => map.get(p).women || 0);
+    const total = labels.map((_, i) => (men[i] || 0) + (women[i] || 0));
 
-      try {
-        const json = await fetchViaProxy();
-        const row = json?.data?.[0];
-        if (!row) throw new Error("Inget data returnerades från SCB.");
+    const lastIndex = labels.length - 1;
+    const last = {
+      period: labels[lastIndex] || '',
+      men: men[lastIndex] || 0,
+      women: women[lastIndex] || 0,
+      total: total[lastIndex] || 0
+    };
 
-        const value = parseInt(row.values?.[0], 10);
-        const year  = (row.key && row.key[row.key.length - 1]) || ""; // sista nyckeln är normalt Tid
-        const updated = json?.updated || ""; // vissa tabeller har detta fält
+    return { labels, men, women, total, last, updated: json?.updated || '' };
+  }
 
-        if (!Number.isFinite(value)) throw new Error("Värdet kunde inte tolkas som heltal.");
+  // Chart.js instans (återanvänds)
+  let chart;
 
-        $value.textContent = `${fmtInt(value)} invånare`;
-        $meta.textContent = [
-          year ? `Senaste år: ${year}` : null,
-          updated ? `Uppdaterad: ${updated}` : null,
-          "Källa: SCB (via proxy)"
-        ].filter(Boolean).join(" · ");
-      } catch (err) {
-        console.error(err);
-        $value.textContent = "—";
-        $error.textContent = String(err?.message || err);
+  function renderChart({ labels, men, women, total }, mode) {
+    const ctx = document.getElementById('chart').getContext('2d');
+    if (chart) { chart.destroy(); chart = null; }
+
+    const datasets = [];
+    if (mode === 'both') {
+      datasets.push(
+        { label: 'Män', data: men, fill: false, tension: 0.15 },
+        { label: 'Kvinnor', data: women, fill: false, tension: 0.15 }
+      );
+    } else if (mode === 'men') {
+      datasets.push({ label: 'Män', data: men, fill: false, tension: 0.15 });
+    } else if (mode === 'women') {
+      datasets.push({ label: 'Kvinnor', data: women, fill: false, tension: 0.15 });
+    } else { // total
+      datasets.push({ label: 'Totalt', data: total, fill: false, tension: 0.15 });
+    }
+
+    const stacked = ($chartType.value === 'stacked' && (mode === 'both'));
+    const fillArea = stacked ? 'origin' : false;
+
+    // Om stacked och both: gör datasets fill=true
+    if (stacked && mode === 'both') {
+      datasets[0].fill = fillArea;
+      datasets[1].fill = fillArea;
+    }
+
+    chart = new Chart(ctx, {
+      type: 'line',
+      data: { labels, datasets },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        stacked,
+        plugins: {
+          legend: { display: true },
+          tooltip: { callbacks: {
+            label: (context) => {
+              const val = context.parsed.y;
+              return `${context.dataset.label}: ${fmtInt(val)}`;
+            }
+          }}
+        },
+        scales: {
+          x: { title: { display: true, text: 'Månad (YYYYMM)' } },
+          y: { title: { display: true, text: 'Invånare' }, ticks: {
+            callback: (v) => fmtInt(v)
+          }}
+        }
       }
-    })();
-  </script>
+    });
+  }
+
+  async function refresh() {
+    $err.textContent = '';
+    $debug.textContent = '';
+    $headline.textContent = 'Hämtar…';
+    $meta.textContent = '';
+
+    const months = parseInt($months.value, 10);
+    const body = buildPxBody(months);
+
+    // Visa den SCB-path vi använder (för transparens)
+    $pxUrl.textContent = `SCB path: ${SCB_PATH}  |  BODY: ${JSON.stringify(body)}`;
+
+    try {
+      const json = await scbFetch(SCB_PATH, body);
+      $debug.textContent = JSON.stringify(json, null, 2);
+      const shaped = reshapeBefolkManad(json);
+
+      // Rubrik/metadata
+      const sexMode = $sexView.value;
+      $headline.textContent = `${fmtInt(shaped.last.total)} invånare (senaste: ${shaped.last.period})`;
+      const metaParts = [
+        `Region: 1883 (Karlskoga)`,
+        `Mått: Folkmängd (BE0101N1)`,
+        shaped.updated ? `Uppdaterad: ${shaped.updated}` : null,
+        sexMode === 'both' ? `Visar Män & Kvinnor` :
+          sexMode === 'men' ? `Visar endast män` :
+          sexMode === 'women' ? `Visar endast kvinnor` : `Visar totalt`
+      ].filter(Boolean);
+      $meta.textContent = metaParts.join(' · ');
+
+      // Rita diagram
+      renderChart(shaped, sexMode);
+
+      // Enable download
+      $download.onclick = () => {
+        const blob = new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' });
+        const a = document.createElement('a');
+        a.href = URL.createObjectURL(blob);
+        a.download = `scb_befolkmanad_${REGION}_${months}m.json`;
+        a.click();
+        URL.revokeObjectURL(a.href);
+      };
+
+    } catch (err) {
+      $headline.textContent = '—';
+      $err.textContent = String(err?.message || err);
+      console.error(err);
+    }
+  }
+
+  // Event handlers
+  $btn.addEventListener('click', () => refresh());
+  $months.addEventListener('change', () => refresh());
+  $sexView.addEventListener('change', () => refresh());
+  $chartType.addEventListener('change', () => refresh());
+
+  // Första körning
+  refresh();
+</script>
 </body>
 </html>
